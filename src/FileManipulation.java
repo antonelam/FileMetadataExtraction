@@ -1,8 +1,8 @@
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.FilenameFilter;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -26,13 +26,15 @@ public class FileManipulation {
 	Document doc;
 	File folder;
 	String[] values = new String[3];
-
+	String[] allowed_fileTypes =  {".doc",".docx",".pdf"};
+	String[] special_fileTypes = {".xml", ".log"};
+	
 	public FileManipulation(String path) {
 		try {
 			this.path = path;
 			//location of the xml template
-			this.doc = readXML("C:\\Users\\antonela.mrkalj\\git\\xml_generate\\generic.metadata.xml");
-			// path to the .doc files
+			this.doc = readXML("C:\\Users\\antonela.mrkalj\\git\\FileMetadataExtraction\\src\\generic.metadata.xml");
+			// path to the .doc, .docx, .pdf files
 			this.folder = new File(path);
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -41,7 +43,7 @@ public class FileManipulation {
 
 	public void startMetadataExtraction() {
 		try {
-			listAllFiles(this.folder, createFilter());
+			listAllFiles(this.folder);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -58,6 +60,9 @@ public class FileManipulation {
 			NamedNodeMap attr = node_.getAttributes();
 			// System.out.println(node_.getTextContent());
 			Node nodeAttr = attr.getNamedItem("key");
+			if("cm:created".equals(nodeAttr.getTextContent())) {
+				node_.setTextContent(LocalDate.now().toString());
+			}
 			if ("acn:HCOCaseType".equals(nodeAttr.getTextContent())) {
 				// System.out.println("I am in");
 				node_.setTextContent(values[0]);
@@ -91,7 +96,7 @@ public class FileManipulation {
 	}
 
 	public Document readXML(String path) throws ParserConfigurationException, SAXException, IOException {
-		// readin xml file - generic script
+		// reading xml file - generic script
 		DocumentBuilderFactory docFactory = DocumentBuilderFactory.newInstance();
 		DocumentBuilder docBuilder = docFactory.newDocumentBuilder();
 		// path to generic xml file
@@ -99,66 +104,109 @@ public class FileManipulation {
 		return doc;
 	}
 
-	public void listAllFiles(File folder, FilenameFilter filter) throws IOException {
-		List<String> rejected = new ArrayList<String>();
-		for (File file_ : folder.listFiles(filter)) {
-			if (file_.isDirectory()) {
-				listAllFiles(file_, filter);
+	public void listAllFiles(File folder) throws IOException {
+		List<String> rejected = new ArrayList<String>();//wrongly formatted names
+		List <String> wrongFileTypes = new ArrayList<String>();//wrong file types
+		//recursive call through the file tree
+		for (File file_ : folder.listFiles(createFilter(wrongFileTypes))) {
+			//get list of approved file names and directories in the current folder
+			if (file_.isDirectory()) {		
+				/*
+				 * if reading folder name, call function listAllFiles again
+				 * this way, for each folder we call listAllFiles
+				 * when we are done, on the exit of the function, we return here, and continue with file name verification
+				 * look up recursive calls if still does not make sense
+				 */
+				listAllFiles(file_);
 			} else {
-				//System.out.println(file_.getName());
 				File temp = new File(file_.getPath() + ".metadata.properties.xml");
-				if (!temp.exists()) { // false
-					// System.out.println(temp);
+				if (!temp.exists()) { 
+					//code won't verify file name if corresponding .xml is generated -- stops overwritting
 					if (VerifyFileName(file_.getName())) {
-						// System.out.println(file_.getName());
+						// if name is correctly formated, generate .xml
 						updateXML(this.doc, folder.getPath(), file_.getName());
-					} else {
-						rejected.add(file_.getPath());
+					} else {				
+						rejected.add(folder.getName() +"\\"+ file_.getName());
 					}
 				}
 			}
 		}
-		// call write function
-		Files.write(Paths.get(folder.getPath(), "Incorrect_Formating.txt"), rejected);
+		/* trying out new output with '|'
+		 * call write function
+		 */
+		//Files.write(Paths.get(folder.getPath(), "Incorrect_Formating.log"), rejected));
+		BufferedWriter writer = new BufferedWriter(new FileWriter(folder.getPath() +"\\"+"Incorrect_Formating.log", false));
+	    writer.append(String.join("|", rejected));   	     
+	    writer.close();
+		//Files.write(Paths.get(folder.getPath(), "Unsupported_FileType.log"), wrongFileTypes);
+	    writer = new BufferedWriter(new FileWriter(folder.getPath() +"\\"+"Unsupported_FileType.log", false));
+	    writer.append(String.join("|", wrongFileTypes));   	     
+	    writer.close();
+		
 	}
 
 	public boolean VerifyFileName(String file_name) {
 		boolean state = true;
 		LocalDate date;
 		// if more than one '.' the system will detect abnormality
-		//
 		String[] file_n = file_name.split("\\.");
 		if (file_n.length > 2)
 			return false;
-		state = file_n[0].matches("^[a-zA-Z]{1,2}_[0-9]{4}_[0-9]{6}");
-		for (String part : file_n[0].split("_")) {
+		/*
+		 * this will filter out everything that doesn't follow requirements
+		 * except for date requirement, the date must be verified	
+		 *	
+		 */
+		state = file_n[0].matches("^[a-zA-Z]{1,2}_[0-9]+_[0-9]{6}");
+		/* 
+		 * here the string is split into array 
+		 * part[0] => case letters
+		 * part[1] => case number
+		 * part[2] => date
+		 */
+		String[] part = file_n[0].split("_");
+		//for (String part : file_n[0].split("_")) {
+		for(int i = 0; i < part.length; i++){
 			if (state) {
-				if (part.length() < 3) {
+				//if (part[i].length() < 3 && part[i].matches("^[a-zA-Z]{1,2}")) {
 					// state = part.matches("[A-Za-z]+");
-					values[0] = part;
-				} else if (part.length() == 4) {
+					//values[i] = part[i];
+				//} else if (part.length() == 4) {
 					// state = part.matches("[0-9]+");
-					values[1] = part;
-				} else if (part.length() == 6) {
-					// check date format
+				//	values[1] = part;
+				//} else if (part[i].length() == 6 && part[i].matches("^[0-9]{6}")) {
+				if (i == 2) {
+					// check date format only
 					try {
 						DateTimeFormatter formatter = DateTimeFormatter.ofPattern("ddMMyy");
-						date = LocalDate.parse(part, formatter);
-						values[2] = date.toString();
-						// System.out.println(date);
+						date = LocalDate.parse(part[i], formatter);
+						values[i] = date.toString();
+						
 					} catch (DateTimeParseException e) {
-						// e.printStackTrace();
+						//if not a date return false
 						state = false;
 					}
 				} else
-					state = false;
+					//state = false;
+					/*
+					 * if case letter or number, just save 
+					 * this variable is used in XML file update
+					 */
+					
+					values[i] = part[i];
 			}
 		}
 		return state;
 	}
 
-	public FilenameFilter createFilter() {
-		// create new filename filter
+	public FilenameFilter createFilter(List <String> wrongFileTypes) {
+		/*
+		 * this creates filter which then filters according to the allowed file types
+		 * it allows directories
+		 * if not a directory and not in allowed file type, write it into wrongFileTypes list
+		 * must write here because FilenameFilter only returns boolean, can't return List
+		 *
+		 */
 		return (dir, name) -> {
 			if (name.lastIndexOf('.') > 0) {
 				// get last index for '.' char
@@ -166,11 +214,20 @@ public class FileManipulation {
 				// get extension
 				String str = name.substring(lastIndex);
 				// match path name extension
-				if (str.equals(".docx") || str.equals(".doc"))
-					return true;
+				for(String attachment: allowed_fileTypes) {//if file .doc, .docx, .pdf allow it
+					if (str.equals(attachment))
+						return true;
+				}	
+				for(String attachment: special_fileTypes) {//if file is .log or .xml please ignore
+					if (str.equals(attachment))
+						return false;
+				}	
+				
 			}
-			else if(dir.isDirectory())		
+			else if(dir.isDirectory())//if file is folder allow it		
 				return true;
+			
+			wrongFileTypes.add(dir.getName() +"\\"+ name);//if nothing from above, filter it out and add to list
 			return false;
 		};
 
